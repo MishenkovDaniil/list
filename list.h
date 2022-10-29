@@ -26,20 +26,23 @@ static const int POISON = 0xDEADBEEF;
 static const canary_t CANARY = 0xAB8EACAAAB8EACAA;
 
 static FILE *list_log = fopen ("list_log.txt", "w");
+static FILE *list_graph = fopen ("list_graph.txt", "w");
 
 enum errors
 {
-    LIST_BAD_READ_LIST          = 0x1 << 0,
-    LIST_BAD_READ_DATA          = 0x1 << 1,
-    LIST_INCORRECT_SIZE         = 0x1 << 2,
-    LIST_INCORRECT_CAPACITY     = 0x1 << 3,
-    LIST_INSERT_ERROR           = 0x1 << 4,
-    LIST_INCORRECT_INSERT_PLACE = 0x1 << 5,
-    LIST_INCORRECT_POP_PLACE    = 0x1 << 6,
-    LIST_POP_FROM_EMPTY_LIST    = 0x1 << 7,
-    LIST_PREV_NEXT_OP_ERR       = 0x1 << 8,
-    LIST_FREE_ELEM_NOT_EMPTY    = 0x1 << 9,
-    LIST_VIOLATED_LIST        = 0x1 << 10
+    LIST_FOPEN_FAIL             = 0x1 << 0,
+    LIST_ALLOCATION_FAIL        = 0x1 << 1,
+    LIST_BAD_READ_LIST          = 0x1 << 2,
+    LIST_BAD_READ_DATA          = 0x1 << 3,
+    LIST_INCORRECT_SIZE         = 0x1 << 4,
+    LIST_INCORRECT_CAPACITY     = 0x1 << 5,
+    LIST_INSERT_ERROR           = 0x1 << 6,
+    LIST_INCORRECT_INSERT_PLACE = 0x1 << 7,
+    LIST_INCORRECT_POP_PLACE    = 0x1 << 8,
+    LIST_POP_FROM_EMPTY_LIST    = 0x1 << 9,
+    LIST_PREV_NEXT_OP_ERR       = 0x1 << 10,
+    LIST_FREE_ELEM_NOT_EMPTY    = 0x1 << 11,
+    LIST_VIOLATED_LIST          = 0x1 << 12
 };
 
 struct List_elem
@@ -79,6 +82,10 @@ void list_dump (List *list, int *err);
 void dump_list_members (List *list, int *err);
 void dump_elems (List *list, int *err);
 void dump_list_errors (List *list, int *err);
+void make_graph (List *list);
+void list_realloc (List *list, int linearize = false, int *err = &ERROR);
+void linearize_list (List *list, int *err);
+
 
 void list_ctor (List *list, int capacity, int *err)
 {
@@ -236,6 +243,52 @@ list_elem_t list_pop (List *list, int pop_place, int *err)
     return return_value;
 }
 
+void list_realloc (List *list, int linearize, int *err)
+{
+    if (list->size >= list->capacity - 1)
+    {
+        list->capacity *= 2;
+        if (linearize)
+        {
+            linearize_list (list, err);
+        }
+        list->elems = (List_elem *)realloc (list->elems, list->capacity * sizeof (List_elem));
+    }
+}
+
+void linearize_list (List *list, int *err)
+{
+    List_elem *temp_elems = (List_elem *)calloc (list->capacity, sizeof (List_elem));
+
+    int phys_index  = list->head;
+    int logic_index = 1;
+
+    while (logic_index <= list->size)
+    {
+        temp_elems[logic_index].data = list->elems[phys_index].data;
+        temp_elems[logic_index].next = logic_index + 1;
+        temp_elems[logic_index].prev = logic_index - 1;
+
+        phys_index = list->elems[phys_index].next;
+        logic_index++;
+    }
+    while (logic_index < list->capacity)
+    {
+        temp_elems[logic_index].data = POISON;
+        temp_elems[logic_index].next = logic_index + 1;
+        temp_elems[logic_index].prev = EMPTY;
+
+        logic_index++;
+    }
+
+    temp_elems[--logic_index].next = NULL_ELEM;
+
+    list->head = 1;
+    list->tale = list->size;
+
+    list->elems = temp_elems;
+}
+
 void list_dtor (List *list, int *err)
 {
     if (list != nullptr && list->elems != nullptr)
@@ -287,7 +340,10 @@ int list_error (List *list, int *err)
         #endif
     }while(0);
 
-    list_dump (list, err);
+    if (*err)
+    {
+        list_dump (list, err);
+    }
 }
 
 void list_dump (List *list, int *err)
@@ -298,6 +354,40 @@ void list_dump (List *list, int *err)
     dump_list_errors  (list, err);
 
     fprintf (list_log, "\n\n\n\n\n");
+
+    make_graph (list);
+}
+
+void make_graph (List *list)
+{
+    int idx = 0;
+    fprintf (list_graph, "digraph {\n\trankdir = LR;\n\t");
+    while (idx < list->capacity)
+    {
+        fprintf (list_graph, "\tlabel_%d [shape = record, label = \"idx[%d]\\n | data [%d]\\n | next [%d]\\n | prev [%d]\"];\n ",
+                                 idx, idx, list->elems[idx].data, list->elems[idx].next, list->elems[idx].prev);
+        idx++;
+    }
+
+    idx = 0;
+    fprintf (list_graph, "\t{edge [style = \"invis\", arrowsize = 44, weight = 1000];\n\t");
+    while (idx < list->capacity - 1)
+    {
+        fprintf (list_graph, "label_%d->", idx);
+        idx++;
+    }
+    fprintf (list_graph, "label_%d;\n\t}\n", idx);
+
+    fprintf (list_graph, "\t{edge [color = \"purple\", arrowsize = 5, weight = 1];\n\t");
+    int counter = 0;
+    idx = list->head;
+
+    while (counter++ < list->size)
+    {
+        fprintf (list_graph, "\tlabel_%d->label_%d [fillcolor = \"lightgrey\"];\n", idx, list->elems[idx].next);
+        idx = list->elems[idx].next;
+    }
+    fprintf (list_graph, "}");
 }
 
 void dump_list_members (List *list, int *err)
@@ -321,31 +411,42 @@ void dump_list_errors (List *list, int *err)
 {
     const char *status[10] = {};
 
-    if (*err & LIST_BAD_READ_LIST)
+    do
     {
-        fprintf (list_log, "list is a bad ptr");
-    }
-    if (*err & LIST_BAD_READ_DATA)
-    {
-        fprintf (list_log, "list elems is a bad ptr");
-    }
-    if (*err & LIST_INCORRECT_CAPACITY)
-    {
-        fprintf (list_log, "capacity is incorrect (<=0)");
-    }
-    if (*err & LIST_PREV_NEXT_OP_ERR)
-    {
-        fprintf (list_log, "next element of previous is not equal to original");
-    }
-    if (*err & LIST_FREE_ELEM_NOT_EMPTY)
-    {
-        fprintf (list_log, "free element is not empty");
-    }
-    if (*err & LIST_VIOLATED_LIST)
-    {
-        fprintf (list_log, "access rights of stack are invaded");
-    }
-
+        if (*err & LIST_FOPEN_FAIL)
+        {
+            fprintf (stderr, "opening of log file failed");
+            break;
+        }
+        if (*err & LIST_ALLOCATION_FAIL)
+        {
+            fprintf (list_log, "calloc failed");
+        }
+        if (*err & LIST_BAD_READ_LIST)
+        {
+            fprintf (list_log, "list is a bad ptr");
+        }
+        if (*err & LIST_BAD_READ_DATA)
+        {
+            fprintf (list_log, "list elems is a bad ptr");
+        }
+        if (*err & LIST_INCORRECT_CAPACITY)
+        {
+            fprintf (list_log, "capacity is incorrect (<=0)");
+        }
+        if (*err & LIST_PREV_NEXT_OP_ERR)
+        {
+            fprintf (list_log, "next element of previous is not equal to original");
+        }
+        if (*err & LIST_FREE_ELEM_NOT_EMPTY)
+        {
+            fprintf (list_log, "free element is not empty");
+        }
+        if (*err & LIST_VIOLATED_LIST)
+        {
+            fprintf (list_log, "access rights of stack are invaded");
+        }
+    }while (0);
 }
 
 
