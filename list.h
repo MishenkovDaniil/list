@@ -24,9 +24,10 @@ static const int NULL_ELEM = 0;
 static const int EMPTY = -1;
 static const int POISON = 0xDEADBEEF;
 static const canary_t CANARY = 0xAB8EACAAAB8EACAA;
+static const int CANARY_NUM = 2;
+static int PNG_FILE_NUMBER = 1;
 
-static FILE *list_log = fopen ("list_log.txt", "w");
-static FILE *list_graph = fopen ("list_graph.txt", "w");
+static FILE *list_log = fopen ("list_log.html", "w");
 
 enum errors
 {
@@ -42,7 +43,8 @@ enum errors
     LIST_POP_FROM_EMPTY_LIST    = 0x1 << 9,
     LIST_PREV_NEXT_OP_ERR       = 0x1 << 10,
     LIST_FREE_ELEM_NOT_EMPTY    = 0x1 << 11,
-    LIST_VIOLATED_LIST          = 0x1 << 12
+    LIST_VIOLATED_LIST          = 0x1 << 12,
+    LIST_VIOLATED_DATA          = 0x1 << 13
 };
 
 struct List_elem
@@ -82,9 +84,9 @@ void list_dump (List *list, int *err);
 void dump_list_members (List *list, int *err);
 void dump_elems (List *list, int *err);
 void dump_list_errors (List *list, int *err);
-void make_graph (List *list);
-void list_realloc (List *list, int linearize = false, int *err = &ERROR);
-void linearize_list (List *list, int *err);
+void make_graph (List *list, FILE *list_graph);
+void list_realloc (List *list, int previous_capacity, int *err = &ERROR);
+void linearize_list (List *list, int *err = &ERROR);
 
 
 void list_ctor (List *list, int capacity, int *err)
@@ -94,21 +96,21 @@ void list_ctor (List *list, int capacity, int *err)
     if (capacity <= 0)
     {
         *err |= LIST_INCORRECT_CAPACITY;
-        list_error (list, err);
     }
+    else
+    {
+        list->capacity = capacity;
 
-    list->elems = (List_elem *)calloc (capacity, sizeof (List_elem)); //check if nullptr
-    assert (list->elems);
+        list_realloc (list, 0);
 
-    list->capacity = capacity;
+        list->head = list->tale = list->size = INITIAL;
 
-    list->head = list->tale = list->size = INITIAL;
+        list->elems[NULL_ELEM].data = list->elems[NULL_ELEM].prev = list->elems[NULL_ELEM].next = INITIAL;
 
-    list->elems[NULL_ELEM].data = list->elems[NULL_ELEM].prev = list->elems[NULL_ELEM].next = INITIAL;
+        list->free = 1;
 
-    list->free = 1;
-
-    fill_list (list, INITIAL + 1, err);
+        fill_list (list, INITIAL + 1, err);
+    }
 
     list_error (list, err);
 }
@@ -117,17 +119,15 @@ int list_insert (List *list, int put_place, list_elem_t value, int *err)
 {
     assert (list);
     assert (err);
-/*
-    if (list->size == list->capacity)
-    {
-        list_realloc (list);
-    }*/
 
     list_error (list, err);
+
+    list_realloc (list, list->capacity);
 
     int insert_index = list->free;
 
     int previous_free = list->free;
+
     list->free = list->elems[previous_free].next;//check if 0
 
     if (put_place < 0)
@@ -170,6 +170,9 @@ int list_insert (List *list, int put_place, list_elem_t value, int *err)
     {
         list->elems[insert_index].data = value;
         list->elems[insert_index].prev = list->tale;
+        list->elems[insert_index].next = NULL_ELEM;
+
+        list->elems[list->tale].next = insert_index;
 
         list->tale = insert_index;
     }
@@ -222,6 +225,7 @@ list_elem_t list_pop (List *list, int pop_place, int *err)
     else if (pop_place == list->tale)
     {
         list->tale = list->elems[pop_place].prev;
+        list->elems[pop_place].next = list->free;
         list->elems[list->tale].next = NULL_ELEM;
     }
     else
@@ -243,16 +247,39 @@ list_elem_t list_pop (List *list, int pop_place, int *err)
     return return_value;
 }
 
-void list_realloc (List *list, int linearize, int *err)
+void list_realloc (List *list, int previous_capacity, int *err)
 {
-    if (list->size >= list->capacity - 1)
+    if (!(previous_capacity))
+    {
+        #ifdef CANARY_PROT
+        list->elems = (List_elem *)calloc (1, sizeof (List_elem) * list->capacity + sizeof (CANARY) * CANARY_NUM); //check if nullptr
+        assert (list->elems);
+
+        *(canary_t *)(list->elems) = CANARY;
+
+        list->elems = (List_elem *)((char *)list->elems + sizeof (canary_t));
+
+        *(canary_t *)(list->elems + list->capacity) = CANARY;
+        #else
+        list->elems = (List_elem *)calloc (list->capacity, sizeof (List_elem)); //check if nullptr
+        #endif
+        fill_list (list, 1, err);
+    }
+    else if (list->size >= list->capacity - 1)
     {
         list->capacity *= 2;
-        if (linearize)
-        {
-            linearize_list (list, err);
-        }
+
+        #ifdef CANARY_PROT
+        list->elems = (List_elem *)realloc (list->elems, list->capacity * sizeof (List_elem) + sizeof (CANARY) * CANARY_NUM);
+        assert (list->elems);
+
+        list->elems = (List_elem *)((char *)list->elems + sizeof (CANARY));
+
+        *(canary_t *)(list->elems + list->capacity) = CANARY;
+        #else
         list->elems = (List_elem *)realloc (list->elems, list->capacity * sizeof (List_elem));
+        #endif
+        fill_list (list, previous_capacity, err);
     }
 }
 
@@ -272,6 +299,8 @@ void linearize_list (List *list, int *err)
         phys_index = list->elems[phys_index].next;
         logic_index++;
     }
+    temp_elems[logic_index - 1].next = NULL_ELEM;
+    list->free = logic_index;
     while (logic_index < list->capacity)
     {
         temp_elems[logic_index].data = POISON;
@@ -287,12 +316,41 @@ void linearize_list (List *list, int *err)
     list->tale = list->size;
 
     list->elems = temp_elems;
+
+    list_error (list, err);
+}
+
+void fill_list (List *list, int start, int *err)
+{
+    list->free = start;
+
+    while (start < list->capacity)
+    {
+        list->elems[start].data = POISON;
+        list->elems[start].prev = EMPTY;
+
+        if (start == list->capacity - 1)
+        {
+            list->elems[start].next = NULL_ELEM;
+        }
+        else
+        {
+            list->elems[start].next = start + 1;
+        }
+
+        start++;
+    }
+
 }
 
 void list_dtor (List *list, int *err)
 {
     if (list != nullptr && list->elems != nullptr)
     {
+        #ifdef CANARY_PROT
+        list->elems = (List_elem *)((char *)list->elems - sizeof (CANARY));
+        #endif
+
         free (list->elems);
 
         list->elems = nullptr;
@@ -336,41 +394,70 @@ int list_error (List *list, int *err)
         }
 
         #ifdef CANARY_PROT
-        CHECK (list->left_canary != CANARY || list->right_canary != CANARY, *err |= LIST_VIOLATED_LIST;)
+        CHECK (list->left_canary != CANARY || list->right_canary != CANARY,
+               *err |= LIST_VIOLATED_LIST;)
+        CHECK (*(canary_t *)((char *)list->elems - sizeof (CANARY)) != CANARY
+            || *(canary_t)(list->elems + list->capacity) != CANARY,
+               *err |= LIST_VIOLATED_DATA;)
         #endif
     }while(0);
 
-    if (*err)
-    {
+    //if (*err)
+    ///{
         list_dump (list, err);
-    }
+    //}
 }
 
 void list_dump (List *list, int *err)
 {
+    FILE *list_graph = fopen ("list_graph", "w");
+    assert (list_graph);
+
     fprintf (list_log, "list\n");
 
     dump_list_members (list, err);
     dump_list_errors  (list, err);
 
+    make_graph (list, list_graph);
+    fclose (list_graph);
+
+    char cmd[100] = {};
+
+    sprintf (cmd, "Dot list_graph -Tpng -o dot%d.png", PNG_FILE_NUMBER);
+    printf ("%s", cmd);
+    system (cmd);
+
+
+    fprintf (list_log, "<img width = 500 src = dot%d.png>", PNG_FILE_NUMBER++);
+
     fprintf (list_log, "\n\n\n\n\n");
 
-    make_graph (list);
 }
 
-void make_graph (List *list)
+void make_graph (List *list, FILE *list_graph)
 {
     int idx = 0;
-    fprintf (list_graph, "digraph {\n\trankdir = LR;\n\t");
+    fprintf (list_graph, "digraph {\n\trankdir = LR;\n\t"
+                         "header [shape = record, label = \"idx\\n | data \\n | next \\n | prev \"];\n");
     while (idx < list->capacity)
     {
-        fprintf (list_graph, "\tlabel_%d [shape = record, label = \"idx[%d]\\n | data [%d]\\n | next [%d]\\n | prev [%d]\"];\n ",
+        if (list->elems[idx].prev == -1)
+        {
+            fprintf (list_graph, "\tlabel_%d [shape = record, style = \"filled\", fillcolor = \"red\", label = \"idx[%d]\\n | D[%d]\\n | N[%d]\\n | P[%d]\"];\n ",
                                  idx, idx, list->elems[idx].data, list->elems[idx].next, list->elems[idx].prev);
+        }
+        else
+        {
+            fprintf (list_graph, "\tlabel_%d [shape = record, style = \"filled\", fillcolor = \"lightblue\", label = \"idx[%d]\\n | D[%d]\\n | N[%d]\\n | P [%d]\"];\n ",
+                                 idx, idx, list->elems[idx].data, list->elems[idx].next, list->elems[idx].prev);
+        }
         idx++;
     }
 
     idx = 0;
     fprintf (list_graph, "\t{edge [style = \"invis\", arrowsize = 44, weight = 1000];\n\t");
+
+    fprintf (list_graph, "header->label_%d;\n\t", idx);
     while (idx < list->capacity - 1)
     {
         fprintf (list_graph, "label_%d->", idx);
@@ -378,7 +465,7 @@ void make_graph (List *list)
     }
     fprintf (list_graph, "label_%d;\n\t}\n", idx);
 
-    fprintf (list_graph, "\t{edge [color = \"purple\", arrowsize = 5, weight = 1];\n\t");
+    fprintf (list_graph, "\tedge [color = \"purple\", arrowsize = 2, weight = 1];\n\t");
     int counter = 0;
     idx = list->head;
 
@@ -444,30 +531,15 @@ void dump_list_errors (List *list, int *err)
         }
         if (*err & LIST_VIOLATED_LIST)
         {
-            fprintf (list_log, "access rights of stack are invaded");
+            fprintf (list_log, "access rights of list are invaded");
+        }
+        if (*err & LIST_VIOLATED_DATA)
+        {
+            fprintf (list_log, "access rights of list data are invaded");
         }
     }while (0);
 }
 
 
-void fill_list (List *list, int start, int *err)
-{
-    while (start < list->capacity)
-    {
-        list->elems[start].data = POISON;
-        list->elems[start].prev = EMPTY;
-
-        if (start == list->capacity - 1)
-        {
-            list->elems[start].next = NULL_ELEM;
-        }
-        else
-        {
-            list->elems[start].next = start + 1;
-        }
-
-        start++;
-    }
-}
 
 #endif /* LIST_H */
