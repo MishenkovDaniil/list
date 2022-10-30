@@ -402,10 +402,10 @@ int list_error (List *list, int *err)
         #endif
     }while(0);
 
-    //if (*err)
-    ///{
+    if (*err)
+    {
         list_dump (list, err);
-    //}
+    }
 }
 
 void list_dump (List *list, int *err)
