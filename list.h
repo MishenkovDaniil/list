@@ -34,7 +34,7 @@ enum errors
     LIST_INSERT_ERROR           = 0x1 << 6,
     LIST_INCORRECT_INSERT_PLACE = 0x1 << 7,
     LIST_INCORRECT_REMOVE_PLACE    = 0x1 << 8,
-    LIST_POP_FROM_EMPTY_LIST    = 0x1 << 9,
+    LIST_REMOVE_FROM_EMPTY_LIST    = 0x1 << 9,
     LIST_PREV_NEXT_OP_ERR       = 0x1 << 10,
     LIST_FREE_ELEM_NOT_EMPTY    = 0x1 << 11,
     LIST_VIOLATED_LIST          = 0x1 << 12,
@@ -54,8 +54,8 @@ struct List
     canary_t left_canary = CANARY;
     #endif
 
-    int head = 0;
-    int tale = 0;
+    //int head = 0;
+    //int tale = 0;
     int free = 0;
     int size = 0;
     int capacity = 0;
@@ -73,7 +73,7 @@ void fill_list         (List *list, int start,                        unsigned i
 void list_dtor         (List *list,                                   unsigned int *err = &ERRNO);
 int list_insert        (List *list, int put_place, list_elem_t value, unsigned int *err = &ERRNO);
 int check_list         (List *list,                                   unsigned int *err);
-list_elem_t list_pop   (List *list, int pop_place,                    unsigned int *err = &ERRNO);
+list_elem_t list_remove   (List *list, int remove_place,              unsigned int *err = &ERRNO);
 void list_dump         (List *list,                                   unsigned int *err);
 void dump_list_members (List *list,                                   unsigned int *err);
 void dump_elems        (List *list,                                   unsigned int *err);
@@ -105,13 +105,13 @@ void list_ctor (List *list, int capacity, unsigned int *err)
 
         list_realloc (list, 0);
 
-        list->head = list->tale = list->size = INITIAL;
+        list->size = INITIAL;
 
         list->elems[NULL_ELEM].data = list->elems[NULL_ELEM].prev = list->elems[NULL_ELEM].next = INITIAL;
 
         list->free = 1;
 
-        fill_list (list, INITIAL + 1, err);
+        fill_list (list, INITIAL, err);
     }
 
     check_list (list, err);
@@ -125,12 +125,9 @@ int list_insert (List *list, int put_place, list_elem_t value, unsigned int *err
     check_list (list, err);
 
     list_realloc (list, list->capacity);
-
     int insert_index = list->free;
-
     int previous_free = list->free;
 
-    list->free = list->elems[previous_free].next;
 
     if (put_place > MAX_CAPACITY)
     {
@@ -141,51 +138,23 @@ int list_insert (List *list, int put_place, list_elem_t value, unsigned int *err
 
         return POISON;
     }
-    else if (!(list->head))
-    {
-        list->head = list->tale = put_place + 1;
-        list->elems[list->head].prev = NULL_ELEM;
-        list->elems[list->head].data = value; //check
-    }
-    else if (!(put_place))
-    {
-
-        list->elems[insert_index].data = value;
-        list->elems[insert_index].next = list->head;
-        list->elems[insert_index].prev = NULL_ELEM;
-
-        list->elems[list->head].prev = insert_index;
-
-        list->head = insert_index;
-    }
-    else if (list->elems[put_place].data == POISON)
+    else if (list->elems[put_place].prev == EMPTY && put_place != NULL_ELEM)
     {
         set_error_bit (err, LIST_INSERT_ERROR);
 
         check_list (list, err);
 
-        list->free = previous_free;
-
         return POISON;
     }
-    else if (put_place == list->tale)
-    {
-        list->elems[insert_index].data = value;
-        list->elems[insert_index].prev = list->tale;
-        list->elems[insert_index].next = NULL_ELEM;
 
-        list->elems[list->tale].next = insert_index;
+    list->free = list->elems[previous_free].next;
 
-        list->tale = insert_index;
-    }
-    else
-    {
-        list->elems[insert_index].data = value;
-        list->elems[insert_index].prev = put_place;
-        list->elems[insert_index].next = list->elems[put_place].next;
+    list->elems[insert_index].data = value;
+    list->elems[insert_index].prev = put_place;
+    list->elems[insert_index].next = list->elems[put_place].next;
 
-        list->elems[put_place].next = insert_index;
-    }
+    list->elems[put_place].next = insert_index;
+    list->elems[list->elems[insert_index].next].prev = insert_index;
 
     (list->size)++;
 
@@ -195,14 +164,12 @@ int list_insert (List *list, int put_place, list_elem_t value, unsigned int *err
 }
 
 // inline function??
-
-
-list_elem_t list_pop (List *list, int pop_place, unsigned int *err)
+list_elem_t list_remove (List *list, int remove_place, unsigned int *err)
 {
 // size capacity size_t
-    if (!(pop_place > 0 && pop_place < list->capacity) || (list->elems[pop_place].data == POISON))
+    if (!(remove_place > 0 && remove_place < list->capacity) || (list->elems[remove_place].prev == EMPTY))
     {
-        fprintf (stderr, "POP_ERROR: incorrect pop place");
+        fprintf (stderr, "REMOVE_ERROR: incorrect remove place");
 
         set_error_bit (err, LIST_INCORRECT_REMOVE_PLACE);
         list_dump (list, err);
@@ -211,9 +178,9 @@ list_elem_t list_pop (List *list, int pop_place, unsigned int *err)
     }
     else if (list->size == 0)
     {
-        fprintf (stderr, "POP_ERROR: pop from empty list");
+        fprintf (stderr, "REMOVE_ERROR: remove from empty list");
 
-        set_error_bit (err, LIST_POP_FROM_EMPTY_LIST);
+        set_error_bit (err, LIST_REMOVE_FROM_EMPTY_LIST);
         list_dump (list, err);
 
         return POISON;
@@ -221,30 +188,17 @@ list_elem_t list_pop (List *list, int pop_place, unsigned int *err)
 
     check_list (list, err);
 
-    int return_value = list->elems[pop_place].data;
+    int return_value = list->elems[remove_place].data;
 
-    if (pop_place == list->head)
-    {
-        list->head = list->elems[pop_place].next;
-        list->elems[list->head].prev = NULL_ELEM;
-    }
-    else if (pop_place == list->tale)
-    {
-        list->tale = list->elems[pop_place].prev;
-        list->elems[pop_place].next = list->free;
-        list->elems[list->tale].next = NULL_ELEM;
-    }
-    else
-    {
-        list->elems[list->elems[pop_place].prev].next = list->elems[pop_place].next;
-        list->elems[list->elems[pop_place].next].prev = list->elems[pop_place].prev;
-    }
+    list->elems[list->elems[remove_place].prev].next = list->elems[remove_place].next;
+    list->elems[list->elems[remove_place].next].prev = list->elems[remove_place].prev;
 
-    list->elems[pop_place].data = POISON;
-    list->elems[pop_place].next = list->free;
-    list->elems[pop_place].prev = EMPTY;
 
-    list->free = pop_place;
+    list->elems[remove_place].data = POISON;
+    list->elems[remove_place].next = list->free;
+    list->elems[remove_place].prev = EMPTY;
+
+    list->free = remove_place;
 
     (list->size)--;
 
@@ -279,13 +233,12 @@ void list_realloc (List *list, int previous_capacity, unsigned int *err)
         if (!(previous_capacity))
         {
             list->free = 1;
-            fill_list (list, 1, err);
         }
         else
         {
             list->free = previous_capacity;
-            fill_list (list, previous_capacity, err);
         }
+        fill_list (list, previous_capacity, err);
     }
 }
 
@@ -345,7 +298,7 @@ int linearize_list (List *list, unsigned int *err, const int seek_index)
         return *err;
     }
 
-    int phys_index  = list->head;
+    int phys_index  = list->elems[NULL_ELEM].next;
     int logic_index = 1;
     int desired_logic_index = 0;
 
@@ -365,6 +318,8 @@ int linearize_list (List *list, unsigned int *err, const int seek_index)
     }
 
     temp_elems[logic_index - 1].next = NULL_ELEM;
+    temp_elems[NULL_ELEM].prev = logic_index - 1;
+    temp_elems[NULL_ELEM].next = 1;
 
     list->free = logic_index;
 
@@ -379,8 +334,8 @@ int linearize_list (List *list, unsigned int *err, const int seek_index)
 
     temp_elems[--logic_index].next = NULL_ELEM;
 
-    list->head = 1;
-    list->tale = list->size;
+    //list->head = 1;
+    //list->tale = list->size;
 
     free (list->elems);
     list->elems = temp_elems;
@@ -404,6 +359,11 @@ void fill_list (List *list, int start, unsigned int *err)
         else
         {
             list->elems[index].next = index + 1;
+        }
+        if (index == 0)
+        {
+            list->elems[index].next = NULL_ELEM;
+            list->elems[index].prev = NULL_ELEM;
         }
     }
 }
@@ -434,7 +394,7 @@ void list_free (List *list)
 
 int check_list (List *list, unsigned int *err)
 {
-    int index = list->head;
+    int index = list->elems[NULL_ELEM].next;
     int counter = 0;
 
     do
@@ -620,7 +580,7 @@ void make_graph (List *list, FILE *list_graph)
 
     fprintf (list_graph, "\tedge [color = \"purple\", weight = 10, penwidth = 10];\n\t");
     int counter = 0;
-    idx = list->head;
+    idx = list->elems[NULL_ELEM].next;
 
     while (counter++ < list->size)
     {
@@ -635,7 +595,7 @@ void dump_list_members (List *list, unsigned int *err)
     fprintf (list_log, "list head is %d\nlist tale is %d\n"
                        "list size id %d\nlist capacity id %d\n"
                        "list free is %d\nlist elems is [%p]\n",
-                       list->head, list->tale, list->size, list->capacity, list->free, list->elems);
+                       list->elems[NULL_ELEM].next, list->elems[NULL_ELEM].prev, list->size, list->capacity, list->free, list->elems);
     dump_elems (list, err);
 }
 
