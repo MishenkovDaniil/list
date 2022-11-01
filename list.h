@@ -34,7 +34,7 @@ enum errors
     LIST_INSERT_ERROR           = 0x1 << 6,
     LIST_INCORRECT_INSERT_PLACE = 0x1 << 7,
     LIST_INCORRECT_REMOVE_PLACE    = 0x1 << 8,
-    LIST_REMOVE_FROM_EMPTY_LIST    = 0x1 << 9,
+    LIST_POP_FROM_EMPTY_LIST    = 0x1 << 9,
     LIST_PREV_NEXT_OP_ERR       = 0x1 << 10,
     LIST_FREE_ELEM_NOT_EMPTY    = 0x1 << 11,
     LIST_VIOLATED_LIST          = 0x1 << 12,
@@ -73,7 +73,7 @@ void fill_list         (List *list, int start,                        unsigned i
 void list_dtor         (List *list,                                   unsigned int *err = &ERRNO);
 int list_insert        (List *list, int put_place, list_elem_t value, unsigned int *err = &ERRNO);
 int check_list         (List *list,                                   unsigned int *err);
-list_elem_t list_remove   (List *list, int remove_place,              unsigned int *err = &ERRNO);
+list_elem_t list_pop   (List *list, int pop_place,                    unsigned int *err = &ERRNO);
 void list_dump         (List *list,                                   unsigned int *err);
 void dump_list_members (List *list,                                   unsigned int *err);
 void dump_elems        (List *list,                                   unsigned int *err);
@@ -197,12 +197,12 @@ int list_insert (List *list, int put_place, list_elem_t value, unsigned int *err
 // inline function??
 
 
-list_elem_t list_remove (List *list, int remove_place, unsigned int *err)
+list_elem_t list_pop (List *list, int pop_place, unsigned int *err)
 {
 // size capacity size_t
-    if (!(remove_place > 0 && remove_place < list->capacity) || (list->elems[remove_place].data == POISON))
+    if (!(pop_place > 0 && pop_place < list->capacity) || (list->elems[pop_place].data == POISON))
     {
-        fprintf (stderr, "REMOVE_ERROR: incorrect remove place");
+        fprintf (stderr, "POP_ERROR: incorrect pop place");
 
         set_error_bit (err, LIST_INCORRECT_REMOVE_PLACE);
         list_dump (list, err);
@@ -211,9 +211,9 @@ list_elem_t list_remove (List *list, int remove_place, unsigned int *err)
     }
     else if (list->size == 0)
     {
-        fprintf (stderr, "REMOVE_ERROR: remove from empty list");
+        fprintf (stderr, "POP_ERROR: pop from empty list");
 
-        set_error_bit (err, LIST_REMOVE_FROM_EMPTY_LIST);
+        set_error_bit (err, LIST_POP_FROM_EMPTY_LIST);
         list_dump (list, err);
 
         return POISON;
@@ -221,30 +221,30 @@ list_elem_t list_remove (List *list, int remove_place, unsigned int *err)
 
     check_list (list, err);
 
-    int return_value = list->elems[remove_place].data;
+    int return_value = list->elems[pop_place].data;
 
-    if (remove_place == list->head)
+    if (pop_place == list->head)
     {
-        list->head = list->elems[remove_place].next;
+        list->head = list->elems[pop_place].next;
         list->elems[list->head].prev = NULL_ELEM;
     }
-    else if (remove_place == list->tale)
+    else if (pop_place == list->tale)
     {
-        list->tale = list->elems[remove_place].prev;
-        list->elems[remove_place].next = list->free;
+        list->tale = list->elems[pop_place].prev;
+        list->elems[pop_place].next = list->free;
         list->elems[list->tale].next = NULL_ELEM;
     }
     else
     {
-        list->elems[list->elems[remove_place].prev].next = list->elems[remove_place].next;
-        list->elems[list->elems[remove_place].next].prev = list->elems[remove_place].prev;
+        list->elems[list->elems[pop_place].prev].next = list->elems[pop_place].next;
+        list->elems[list->elems[pop_place].next].prev = list->elems[pop_place].prev;
     }
 
-    list->elems[remove_place].data = POISON;
-    list->elems[remove_place].next = list->free;
-    list->elems[remove_place].prev = EMPTY;
+    list->elems[pop_place].data = POISON;
+    list->elems[pop_place].next = list->free;
+    list->elems[pop_place].prev = EMPTY;
 
-    list->free = remove_place;
+    list->free = pop_place;
 
     (list->size)--;
 
@@ -293,9 +293,10 @@ int find_logic_number (List *list, int phys_index, unsigned int *err)
 {
     printf ("the function will be working too long, do you really want to call it (ALL INDEX WILL BE INVALID THEN)? (yes/no)");
 
-    int answer_size = 5;
-
+    const int answer_size = 5;
     char status[answer_size] = {};
+
+    scanf ("%s", status);
 
     if (stricmp (status, "yes") == 0)
     {
@@ -313,7 +314,7 @@ int find_number (List *list, int phys_index, unsigned int *err)
 {
     printf ("the function will be working too long, do you really want to call it (ALL INDEX WILL BE INVALID THEN)? (yes/no)");
 
-    int answer_size = 5;
+    const int answer_size = 5;
     char status[answer_size] = {};
 
     scanf ("%s", status);
