@@ -14,7 +14,7 @@ typedef int list_elem_t;
 typedef unsigned long long canary_t;
 
 static const int INITIAL = 0;
-static const int NULL_ELEM = 0; // 0 nullptr NULL
+static const int NULL_ELEM = 0;
 static const int EMPTY = -1;
 static const int POISON = 0xDEADBEEF;
 static const canary_t CANARY = 0xAB8EACAAAB8EACAA;
@@ -54,8 +54,6 @@ struct List
     canary_t left_canary = CANARY;
     #endif
 
-    //int head = 0;
-    //int tale = 0;
     int free = 0;
     int size = 0;
     int capacity = 0;
@@ -259,8 +257,9 @@ int find_logic_number (List *list, int phys_index, unsigned int *err)
         {
             return desired_index;
         }
+
+        printf ("this element is empty or null");
     }
-    printf ("this element is empty or null");
 }
 
 int find_number (List *list, int phys_index, unsigned int *err)
@@ -280,8 +279,15 @@ int find_number (List *list, int phys_index, unsigned int *err)
         {
             return desired_index;
         }
+
+        printf ("this element is empty or null");
     }
-    printf ("this element is empty or null");
+    else
+    {
+        List new_list = {};
+        new_list.elems[NULL_ELEM].data = POISON;
+    }
+
 }
 
 int linearize_list (List *list, unsigned int *err, const int seek_index)
@@ -333,9 +339,6 @@ int linearize_list (List *list, unsigned int *err, const int seek_index)
     }
 
     temp_elems[--logic_index].next = NULL_ELEM;
-
-    //list->head = 1;
-    //list->tale = list->size;
 
     free (list->elems);
     list->elems = temp_elems;
@@ -619,7 +622,6 @@ void dump_list_errors (List *list, unsigned int *err)
 
     do
     {
-    // log err or list err
         if (*err & LOG_FOPEN_FAIL)
         {
             fprintf (stderr, "opening of log file failed");
