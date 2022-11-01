@@ -8,8 +8,7 @@
 #include "../ptr_check.h"
 
 // Fix
-#undef ERROR
-static unsigned int ERROR = 0;
+static unsigned int ERRNO = 0;
 
 typedef int list_elem_t;
 typedef unsigned long long canary_t;
@@ -20,13 +19,13 @@ static const int EMPTY = -1;
 static const int POISON = 0xDEADBEEF;
 static const canary_t CANARY = 0xAB8EACAAAB8EACAA;
 static const int CANARY_NUM = 2;
-
+static const int MAX_CAPACITY = 100000;
 
 static FILE *list_log = fopen ("list_log.html", "w");
 
 enum errors
 {
-    LIST_FOPEN_FAIL             = 0x1 << 0,
+    LOG_FOPEN_FAIL             = 0x1 << 0,
     LIST_ALLOCATION_FAIL        = 0x1 << 1,
     LIST_BAD_READ_LIST          = 0x1 << 2,
     LIST_BAD_READ_DATA          = 0x1 << 3,
@@ -34,8 +33,8 @@ enum errors
     LIST_INCORRECT_CAPACITY     = 0x1 << 5,
     LIST_INSERT_ERROR           = 0x1 << 6,
     LIST_INCORRECT_INSERT_PLACE = 0x1 << 7,
-    LIST_INCORRECT_POP_PLACE    = 0x1 << 8,
-    LIST_POP_FROM_EMPTY_LIST    = 0x1 << 9,
+    LIST_INCORRECT_REMOVE_PLACE    = 0x1 << 8,
+    LIST_REMOVE_FROM_EMPTY_LIST    = 0x1 << 9,
     LIST_PREV_NEXT_OP_ERR       = 0x1 << 10,
     LIST_FREE_ELEM_NOT_EMPTY    = 0x1 << 11,
     LIST_VIOLATED_LIST          = 0x1 << 12,
@@ -57,8 +56,8 @@ struct List
 
     int head = 0;
     int tale = 0;
-    int size = 0;
     int free = 0;
+    int size = 0;
     int capacity = 0;
 
     List_elem *elems = nullptr;
@@ -69,21 +68,23 @@ struct List
 };
 
 
-void list_ctor         (List *list, int capacity,                     unsigned int *err = &ERROR);
+void list_ctor         (List *list, int capacity,                     unsigned int *err = &ERRNO);
 void fill_list         (List *list, int start,                        unsigned int *err);
-void list_dtor         (List *list,                                   unsigned int *err = &ERROR);
-int list_insert        (List *list, int put_place, list_elem_t value, unsigned int *err = &ERROR);
+void list_dtor         (List *list,                                   unsigned int *err = &ERRNO);
+int list_insert        (List *list, int put_place, list_elem_t value, unsigned int *err = &ERRNO);
 int check_list         (List *list,                                   unsigned int *err);
-list_elem_t list_pop   (List *list, int pop_place,                    unsigned int *err = &ERROR);
+list_elem_t list_remove   (List *list, int remove_place,              unsigned int *err = &ERRNO);
 void list_dump         (List *list,                                   unsigned int *err);
 void dump_list_members (List *list,                                   unsigned int *err);
 void dump_elems        (List *list,                                   unsigned int *err);
 void dump_list_errors  (List *list,                                   unsigned int *err);
 void make_graph        (List *list, FILE *list_graph);
-void list_realloc      (List *list, int previous_capacity,            unsigned int *err = &ERROR);
-void linearize_list    (List *list,                                   unsigned int *err = &ERROR);
+void list_realloc      (List *list, int previous_capacity,            unsigned int *err = &ERRNO);
+int linearize_list     (List *list,                                   unsigned int *err = &ERRNO, const int phys_index = 0);
 void list_free         (List *list);
 void set_error_bit     (unsigned int *error, int bit);
+int find_logic_number (List *list, int phys_index, unsigned int *err = &ERRNO);
+int find_number (List *list, int phys_index, unsigned int *err = &ERRNO);
 
 void set_error_bit (unsigned int *error, int bit)
 {
@@ -94,7 +95,7 @@ void list_ctor (List *list, int capacity, unsigned int *err)
 {
     assert (list);
 
-    if (capacity <= 0)
+    if (capacity <= 0 || capacity > MAX_CAPACITY)
     {
         set_error_bit (err, LIST_INCORRECT_CAPACITY);
     }
@@ -129,9 +130,9 @@ int list_insert (List *list, int put_place, list_elem_t value, unsigned int *err
 
     int previous_free = list->free;
 
-    list->free = list->elems[previous_free].next;//check if 0
+    list->free = list->elems[previous_free].next;
 
-    if (put_place < 0)
+    if (put_place > MAX_CAPACITY)
     {
         set_error_bit (err, LIST_INCORRECT_INSERT_PLACE);
         check_list (list, err);
@@ -196,25 +197,23 @@ int list_insert (List *list, int put_place, list_elem_t value, unsigned int *err
 // inline function??
 
 
-list_elem_t list_pop (List *list, int pop_place, unsigned int *err)
+list_elem_t list_remove (List *list, int remove_place, unsigned int *err)
 {
 // size capacity size_t
-    if (!(pop_place > 0 && pop_place < list->capacity) || (list->elems[pop_place].data == POISON))
+    if (!(remove_place > 0 && remove_place < list->capacity) || (list->elems[remove_place].data == POISON))
     {
-        fprintf (stderr, "POP_ERROR: incorrect pop place");
+        fprintf (stderr, "REMOVE_ERROR: incorrect remove place");
 
-        set_error_bit (err, LIST_INCORRECT_POP_PLACE);
-        //check_list (list, err);
+        set_error_bit (err, LIST_INCORRECT_REMOVE_PLACE);
         list_dump (list, err);
 
         return POISON;
     }
     else if (list->size == 0)
     {
-        fprintf (stderr, "POP_ERROR: pop from empty list");
+        fprintf (stderr, "REMOVE_ERROR: remove from empty list");
 
-        set_error_bit (err, LIST_POP_FROM_EMPTY_LIST);
-        //check_list (list, err);
+        set_error_bit (err, LIST_REMOVE_FROM_EMPTY_LIST);
         list_dump (list, err);
 
         return POISON;
@@ -222,30 +221,30 @@ list_elem_t list_pop (List *list, int pop_place, unsigned int *err)
 
     check_list (list, err);
 
-    int return_value = list->elems[pop_place].data;
+    int return_value = list->elems[remove_place].data;
 
-    if (pop_place == list->head)
+    if (remove_place == list->head)
     {
-        list->head = list->elems[pop_place].next;
+        list->head = list->elems[remove_place].next;
         list->elems[list->head].prev = NULL_ELEM;
     }
-    else if (pop_place == list->tale)
+    else if (remove_place == list->tale)
     {
-        list->tale = list->elems[pop_place].prev;
-        list->elems[pop_place].next = list->free;
+        list->tale = list->elems[remove_place].prev;
+        list->elems[remove_place].next = list->free;
         list->elems[list->tale].next = NULL_ELEM;
     }
     else
     {
-        list->elems[list->elems[pop_place].prev].next = list->elems[pop_place].next;
-        list->elems[list->elems[pop_place].next].prev = list->elems[pop_place].prev;
+        list->elems[list->elems[remove_place].prev].next = list->elems[remove_place].next;
+        list->elems[list->elems[remove_place].next].prev = list->elems[remove_place].prev;
     }
 
-    list->elems[pop_place].data = POISON;
-    list->elems[pop_place].next = list->free;
-    list->elems[pop_place].prev = EMPTY;
+    list->elems[remove_place].data = POISON;
+    list->elems[remove_place].next = list->free;
+    list->elems[remove_place].prev = EMPTY;
 
-    list->free = pop_place;
+    list->free = remove_place;
 
     (list->size)--;
 
@@ -254,58 +253,108 @@ list_elem_t list_pop (List *list, int pop_place, unsigned int *err)
     return return_value;
 }
 
-// realloc = memory + canaries
-// STOP COPYPASTA
-// realloc (nullptr)? = calloc cppref
 void list_realloc (List *list, int previous_capacity, unsigned int *err)
 {
-    if (!(previous_capacity))
+    if (!(previous_capacity) || list->size >= list->capacity - 1)
     {
-        #ifdef CANARY_PROT
-        list->elems = (List_elem *)calloc (1, sizeof (List_elem) * list->capacity + sizeof (CANARY) * CANARY_NUM); //check if nullptr
-        assert (list->elems);
-
-        *(canary_t *)(list->elems) = CANARY;
-
-        list->elems = (List_elem *)((char *)list->elems + sizeof (canary_t));
-
-        *(canary_t *)(list->elems + list->capacity) = CANARY;
-        #else
-        list->elems = (List_elem *)calloc (list->capacity, sizeof (List_elem)); //check if nullptr
-        #endif
-        list->free = 1;
-        fill_list (list, 1, err);
-    }
-    else if (list->size >= list->capacity - 1)
-    {
-        list->capacity *= 2;
+        list->capacity += previous_capacity;
 
         #ifdef CANARY_PROT
-        list->elems = (List_elem *)realloc (list->elems, list->capacity * sizeof (List_elem) + sizeof (CANARY) * CANARY_NUM);
+        list->elems = (List_elem *)realloc (list->elems, sizeof (List_elem) * list->capacity + sizeof (CANARY) * CANARY_NUM); //check if nullptr
         assert (list->elems);
+
+        if (!(previous_capacity))
+        {
+            *(canary_t *)(list->elems) = CANARY;
+        }
 
         list->elems = (List_elem *)((char *)list->elems + sizeof (CANARY));
 
         *(canary_t *)(list->elems + list->capacity) = CANARY;
         #else
-        list->elems = (List_elem *)realloc (list->elems, list->capacity * sizeof (List_elem));
+        list->elems = (List_elem *)realloc (list->elems, list->capacity * sizeof (List_elem)); //check if nullptr
+        assert (list->elems);
         #endif
-        list->free = previous_capacity;
-        fill_list (list, previous_capacity, err);
+
+        if (!(previous_capacity))
+        {
+            list->free = 1;
+            fill_list (list, 1, err);
+        }
+        else
+        {
+            list->free = previous_capacity;
+            fill_list (list, previous_capacity, err);
+        }
     }
 }
 
-void linearize_list (List *list, unsigned int *err)
+int find_logic_number (List *list, int phys_index, unsigned int *err)
 {
-    // no additional memory
+    printf ("the function will be working too long, do you really want to call it (ALL INDEX WILL BE INVALID THEN)? (yes/no)");
+
+    int answer_size = 5;
+
+    char status[answer_size] = {};
+
+    if (stricmp (status, "yes") == 0)
+    {
+        int desired_index = linearize_list (list, err, phys_index);
+
+        if (desired_index)
+        {
+            return desired_index;
+        }
+    }
+    printf ("this element is empty or null");
+}
+
+int find_number (List *list, int phys_index, unsigned int *err)
+{
+    printf ("the function will be working too long, do you really want to call it (ALL INDEX WILL BE INVALID THEN)? (yes/no)");
+
+    int answer_size = 5;
+    char status[answer_size] = {};
+
+    scanf ("%s", status);
+
+    if (stricmp (status, "no") == 0)
+    {
+        int desired_index = linearize_list (list, err, phys_index);
+
+        if (desired_index)
+        {
+            return desired_index;
+        }
+    }
+    printf ("this element is empty or null");
+}
+
+int linearize_list (List *list, unsigned int *err, const int seek_index)
+{
+    //no additional memory
     List_elem *temp_elems = (List_elem *)calloc (list->capacity, sizeof (List_elem));
-    // error? free?
+    assert (temp_elems);
+
+    if (temp_elems == nullptr)
+    {
+        fprintf (stderr, "ERROR: allocation failed");
+        set_error_bit (err, LIST_ALLOCATION_FAIL);
+
+        return *err;
+    }
 
     int phys_index  = list->head;
     int logic_index = 1;
+    int desired_logic_index = 0;
 
     while (logic_index <= list->size)
     {
+        if (seek_index > 0 && phys_index == seek_index)
+        {
+            desired_logic_index = logic_index;
+        }
+
         temp_elems[logic_index].data = list->elems[phys_index].data;
         temp_elems[logic_index].next = logic_index + 1;
         temp_elems[logic_index].prev = logic_index - 1;
@@ -313,8 +362,11 @@ void linearize_list (List *list, unsigned int *err)
         phys_index = list->elems[phys_index].next;
         logic_index++;
     }
+
     temp_elems[logic_index - 1].next = NULL_ELEM;
+
     list->free = logic_index;
+
     while (logic_index < list->capacity)
     {
         temp_elems[logic_index].data = POISON;
@@ -332,8 +384,9 @@ void linearize_list (List *list, unsigned int *err)
     free (list->elems);
     list->elems = temp_elems;
 
-
     check_list (list, err);
+
+    return desired_logic_index;
 }
 
 void fill_list (List *list, int start, unsigned int *err)
@@ -352,7 +405,6 @@ void fill_list (List *list, int start, unsigned int *err)
             list->elems[index].next = index + 1;
         }
     }
-    //list->free = start;
 }
 
 void list_dtor (List *list, unsigned int *err)
@@ -454,7 +506,7 @@ void list_dump (List *list, unsigned int *err)
     FILE *list_graph = fopen ("list_graph", "w");
     assert (list_graph);
 
-    fprintf (list_log, "list[%p]\n", list);
+    fprintf (list_log, "<pre>\nlist[%p]\n", list);
 
     dump_list_members (list, err);
     dump_list_errors  (list, err);
@@ -532,13 +584,16 @@ struct gv_Attribute
 void make_graph (List *list, FILE *list_graph)
 {
     int idx = 0;
-    fprintf (list_graph, "digraph {\n\trankdir = LR;\n\t"
-                         "header [shape = record, label = \"idx\\n | data \\n | next \\n | prev \"];\n");
+    fprintf (list_graph, "digraph {\n\tgraph [dpi = 100]\n\t"
+                         "splines = \"ortho\";\n\t"
+                         "rankdir = LR;\n\t"
+                         "header [shape = record,  style = \"filled\", fillcolor = \"grey73\","
+                         "label = \"idx\\n | data \\n | next \\n | prev \"];\n");
     while (idx < list->capacity)
     {
         if (list->elems[idx].prev == -1)
         {
-            fprintf (list_graph, "\tlabel_%d [shape = record, style = \"filled\", fillcolor = \"red\","
+            fprintf (list_graph, "\tlabel_%d [shape = record, style = \"filled\", fillcolor = \"salmon1\","
                                  "label = \"%d\\n | d[%p]\\n | n[%d]\\n | p[%d](empty)\"];\n ",
                                  idx, idx, list->elems[idx].data, list->elems[idx].next, list->elems[idx].prev);
         }
@@ -562,13 +617,13 @@ void make_graph (List *list, FILE *list_graph)
     }
     fprintf (list_graph, "label_%d;\n\t}\n", idx);
 
-    fprintf (list_graph, "\tedge [color = \"purple\", arrowsize = 2, weight = 1];\n\t");
+    fprintf (list_graph, "\tedge [color = \"purple\", weight = 10, penwidth = 10];\n\t");
     int counter = 0;
     idx = list->head;
 
     while (counter++ < list->size)
     {
-        fprintf (list_graph, "\tlabel_%d->label_%d [fillcolor = \"lightgrey\"];\n", idx, list->elems[idx].next);
+        fprintf (list_graph, "\tlabel_%d->label_%d;\n", idx, list->elems[idx].next);
         idx = list->elems[idx].next;
     }
     fprintf (list_graph, "}");
@@ -604,7 +659,7 @@ void dump_list_errors (List *list, unsigned int *err)
     do
     {
     // log err or list err
-        if (*err & LIST_FOPEN_FAIL)
+        if (*err & LOG_FOPEN_FAIL)
         {
             fprintf (stderr, "opening of log file failed");
             break;
