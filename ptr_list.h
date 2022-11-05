@@ -64,19 +64,20 @@ struct List
 };
 
 
-void list_ctor         (List *list,                     unsigned int *err = &ERRNO);
-void list_dtor         (List *list,                                   unsigned int *err = &ERRNO);
-void list_insert        (List *list, int put_place, list_elem_t value, unsigned int *err = &ERRNO);
-int check_list         (List *list,                                   unsigned int *err);
-list_elem_t list_remove   (List *list, int remove_place,              unsigned int *err = &ERRNO);
-void list_dump         (List *list,                                   unsigned int *err);
-void dump_list_members (List *list,                                   unsigned int *err);
-void dump_elems        (List *list,                                   unsigned int *err);
-void dump_list_errors  (List *list,                                   unsigned int *err);
-void make_graph        (List *list, FILE *list_graph);
-void list_free         (List *list);
-void set_error_bit     (unsigned int *error, int bit);
-List_elem *find_elem (List *list, int phys_index, unsigned int *err = &ERRNO);
+void list_ctor          (List *list,                                          unsigned int *err = &ERRNO);
+void list_dtor          (List *list,                                          unsigned int *err = &ERRNO);
+List_elem *list_insert  (List *list, List_elem *put_place, list_elem_t value, unsigned int *err = &ERRNO);
+list_elem_t list_remove (List *list, List_elem *remove_place,                 unsigned int *err = &ERRNO);
+List_elem *find_elem    (List *list, int phys_index, unsigned int *err = &ERRNO);
+void list_free          (List *list);
+void set_error_bit      (unsigned int *error, int bit);
+
+int check_list          (List *list, unsigned int *err);
+void list_dump          (List *list, unsigned int *err);
+void dump_list_members  (List *list, unsigned int *err);
+void dump_elems         (List *list, unsigned int *err);
+void dump_list_errors   (List *list, unsigned int *err);
+void make_graph         (List *list, FILE *list_graph);
 
 void set_error_bit (unsigned int *error, int bit)
 {
@@ -105,20 +106,14 @@ void list_ctor (List *list, unsigned int *err)
     check_list (list, err);
 }
 
-void list_insert (List *list, int put_place, list_elem_t value, unsigned int *err)
+List_elem *list_insert (List *list, List_elem *put_place, list_elem_t value, unsigned int *err)
 {
     assert (list);
     assert (err);
 
     check_list (list, err);
 
-    List_elem *put_place_elem = list->zero_elem;
-
     List_elem *temp_elem = (List_elem *)calloc (1, sizeof (List_elem));
-    while (put_place--)
-    {
-        put_place_elem = put_place_elem->next;
-    }
 
     /*if (put_place > list->size)
     {
@@ -137,20 +132,22 @@ void list_insert (List *list, int put_place, list_elem_t value, unsigned int *er
     }*/
 
     temp_elem->data = value;
-    temp_elem->prev = put_place_elem;
-    temp_elem->next = put_place_elem->next;
+    temp_elem->prev = put_place;
+    temp_elem->next = put_place->next;
 
-    put_place_elem->next = temp_elem;
+    put_place->next = temp_elem;
     temp_elem->next->prev = temp_elem;
 
     (list->size)++;
 
     check_list (list, err);
+
+    return temp_elem;
 }
 
-list_elem_t list_remove (List *list, int remove_place, unsigned int *err)
+list_elem_t list_remove (List *list, List_elem *remove_elem, unsigned int *err)
 {
-    if (remove_place == 0)
+    if (remove_elem == nullptr)
     {
         fprintf (stderr, "REMOVE_ERROR: incorrect remove place");
 
@@ -171,20 +168,11 @@ list_elem_t list_remove (List *list, int remove_place, unsigned int *err)
 
     check_list (list, err);
 
-    List_elem *temp_elem = list->zero_elem;
-
-    while (remove_place--)
-    {
-        temp_elem = temp_elem->next;
-    }
-
-    int return_value = temp_elem->data;
-    temp_elem->prev->next = temp_elem->next;
-    temp_elem->next->prev = temp_elem->prev;
+    list_elem_t return_value = remove_elem->data;
+    remove_elem->prev->next = remove_elem->next;
+    remove_elem->next->prev = remove_elem->prev;
 
     (list->size)--;
-
-    free (temp_elem);
 
     check_list (list, err);
 
