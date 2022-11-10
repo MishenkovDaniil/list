@@ -66,23 +66,23 @@ struct List
 };
 
 
-void list_ctor         (List *list, int capacity,                     unsigned int *err = &ERRNO);
-void fill_list         (List *list, int start,                        unsigned int *err);
-void list_dtor         (List *list,                                   unsigned int *err = &ERRNO);
-int list_insert        (List *list, int put_place, list_elem_t value, unsigned int *err = &ERRNO);
-int check_list         (List *list,                                   unsigned int *err);
-list_elem_t list_remove   (List *list, int remove_place,              unsigned int *err = &ERRNO);
-void list_dump         (List *list,                                   unsigned int *err);
-void dump_list_members (List *list,                                   unsigned int *err);
-void dump_elems        (List *list,                                   unsigned int *err);
-void dump_list_errors  (List *list,                                   unsigned int *err);
-void make_graph        (List *list, FILE *list_graph);
-void list_realloc      (List *list, int previous_capacity,            unsigned int *err = &ERRNO);
-int linearize_list     (List *list,                                   unsigned int *err = &ERRNO, const int phys_index = 0);
-void list_free         (List *list);
-void set_error_bit     (unsigned int *error, int bit);
-int find_logic_number (List *list, int phys_index, unsigned int *err = &ERRNO);
-int find_number (List *list, int phys_index, unsigned int *err = &ERRNO);
+void list_ctor          (List *list, int capacity,                     unsigned int *err = &ERRNO);
+void fill_list          (List *list, int start,                        unsigned int *err);
+void list_dtor          (List *list,                                   unsigned int *err = &ERRNO);
+int list_insert         (List *list, int put_place, list_elem_t value, unsigned int *err = &ERRNO);
+int check_list          (List *list,                                   unsigned int *err);
+list_elem_t list_remove (List *list, int remove_place,                 unsigned int *err = &ERRNO);
+void list_dump          (List *list,                                   unsigned int *err);
+void dump_list_members  (List *list,                                   unsigned int *err);
+void dump_elems         (List *list,                                   unsigned int *err);
+void dump_list_errors   (List *list,                                   unsigned int *err);
+void make_graph         (List *list, FILE *list_graph);
+void list_realloc       (List *list, int previous_capacity,            unsigned int *err = &ERRNO);
+int linearize_list      (List *list,                                   unsigned int *err = &ERRNO, const int phys_index = 0);
+void list_free          (List *list);
+int find_logic_number   (List *list, int phys_index, unsigned int *err = &ERRNO);
+int find_number         (List *list, int phys_index, unsigned int *err = &ERRNO);
+void set_error_bit      (unsigned int *error, int bit);
 
 void set_error_bit (unsigned int *error, int bit)
 {
@@ -240,9 +240,13 @@ void list_realloc (List *list, int previous_capacity, unsigned int *err)
     }
 }
 
+//for цикл
+//headers in dump (h2)
+//---------------------
+//<details>
 int find_logic_number (List *list, int phys_index, unsigned int *err)
 {
-    printf ("the function will be working too long, do you really want to call it (ALL INDEX WILL BE INVALID THEN)? (yes/no)");
+    printf ("the function will be working too long, do you really want to call it? (yes/no)");
 
     const int answer_size = 5;
     char status[answer_size] = {};
@@ -251,7 +255,18 @@ int find_logic_number (List *list, int phys_index, unsigned int *err)
 
     if (stricmp (status, "yes") == 0)
     {
-        int desired_index = linearize_list (list, err, phys_index);
+        int desired_index = 1;
+
+        List_elem elem = list->elems[phys_index];
+
+        if (elem.data != POISON && elem.prev != EMPTY)
+        {
+            while (elem.prev)
+            {
+                elem = list->elems[elem.prev];
+                desired_index++;
+            }
+        }
 
         if (desired_index)
         {
@@ -260,11 +275,13 @@ int find_logic_number (List *list, int phys_index, unsigned int *err)
 
         printf ("this element is empty or null");
     }
+
+    return 0;
 }
 
 int find_number (List *list, int phys_index, unsigned int *err)
 {
-    printf ("the function will be working too long, do you really want to call it (ALL INDEX WILL BE INVALID THEN)? (yes/no)");
+    printf ("the function will be working too long, do you really want to call it? (yes/no)");
 
     const int answer_size = 5;
     char status[answer_size] = {};
@@ -273,7 +290,18 @@ int find_number (List *list, int phys_index, unsigned int *err)
 
     if (stricmp (status, "no") == 0)
     {
-        int desired_index = linearize_list (list, err, phys_index);
+        int desired_index = 1;
+
+        List_elem elem = list->elems[phys_index];
+
+        if (elem.data != POISON && elem.prev != EMPTY)
+        {
+            while (elem.prev)
+            {
+                elem = list->elems[elem.prev];
+                desired_index++;
+            }
+        }
 
         if (desired_index)
         {
@@ -326,6 +354,7 @@ int linearize_list (List *list, unsigned int *err, const int seek_index)
     temp_elems[logic_index - 1].next = NULL_ELEM;
     temp_elems[NULL_ELEM].prev = logic_index - 1;
     temp_elems[NULL_ELEM].next = 1;
+    temp_elems[NULL_ELEM].data = POISON;
 
     list->free = logic_index;
 
@@ -397,7 +426,7 @@ void list_free (List *list)
 
 int check_list (List *list, unsigned int *err)
 {
-    int index = list->elems[NULL_ELEM].next;
+    int index = NULL_ELEM;
     int counter = 0;
 
     do
@@ -423,7 +452,7 @@ int check_list (List *list, unsigned int *err)
 
         if (!(*err & LIST_INCORRECT_SIZE) && !(*err & LIST_INCORRECT_CAPACITY))
         {
-            while (counter++ < list->size - 1)
+            while (counter++ <= list->size)
             {
                 if (list->elems[list->elems[index].next].prev != index)
                 {
@@ -457,10 +486,10 @@ int check_list (List *list, unsigned int *err)
         #endif
     }while(0);
 
-    //if (*err)
-    //{
+    if (*err)
+    {
     list_dump (list, err);
-    //}
+    }
 }
 
 void list_dump (List *list, unsigned int *err)
@@ -470,10 +499,15 @@ void list_dump (List *list, unsigned int *err)
     FILE *list_graph = fopen ("list_graph", "w");
     assert (list_graph);
 
-    fprintf (list_log, "<pre>\nlist[%p]\n", list);
+    fprintf (list_log, "<pre>\n");
+
+    fprintf (list_log, "<details>");
+
+    fprintf (list_log, "list[%p]\n", list);
 
     dump_list_members (list, err);
-    dump_list_errors  (list, err);
+
+    fprintf (list_log, "</details>\n");
 
     make_graph (list, list_graph);
     fclose (list_graph);
@@ -485,10 +519,11 @@ void list_dump (List *list, unsigned int *err)
     system (cmd);
 
 
-    fprintf (list_log, "<img src = dot%d.png>", PNG_FILE_NUMBER++);
+    fprintf (list_log, "<img src = dot%d.png>\n", PNG_FILE_NUMBER++);
+
+    dump_list_errors  (list, err);
 
     fprintf (list_log, "\n\n\n\n\n");
-
 }
 /*
 struct gv_Node
@@ -581,7 +616,7 @@ void make_graph (List *list, FILE *list_graph)
     }
     fprintf (list_graph, "label_%d;\n\t}\n", idx);
 
-    fprintf (list_graph, "\tedge [color = \"purple\", weight = 10, penwidth = 10];\n\t");
+    fprintf (list_graph, "\tedge [color = \"purple\", weight = 10];\n\t");
     int counter = 0;
     idx = list->elems[NULL_ELEM].next;
 
