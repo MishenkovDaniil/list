@@ -48,6 +48,15 @@ struct List_elem
     int prev = 0;
 };
 
+struct List_debug
+{
+    const char *call_func = nullptr;
+    const char *call_file = nullptr;
+    const char *func      = nullptr;
+    const char *file      = nullptr;
+    int   call_line = 0;
+};
+
 struct List
 {
     #ifdef CANARY_PROT
@@ -59,6 +68,10 @@ struct List
     int capacity = 0;
 
     List_elem *elems = nullptr;
+
+    #ifdef LIST_DEBUG
+    List_debug debug_info = {};
+    #endif
 
     #ifdef CANARY_PROT
     canary_t right_canary = CANARY;
@@ -78,11 +91,28 @@ void dump_elems         (List *list,                                   unsigned 
 void dump_list_errors   (List *list,                                   unsigned int *err);
 void make_graph         (List *list, FILE *list_graph);
 void list_realloc       (List *list, int previous_capacity,            unsigned int *err = &ERRNO);
-int linearize_list      (List *list,                                   unsigned int *err = &ERRNO, const int phys_index = 0);
+int linearize_list      (List *list,                                   unsigned int *err = &ERRNO);
 void list_free          (List *list);
 int find_logic_number   (List *list, int phys_index, unsigned int *err = &ERRNO);
 int find_number         (List *list, int phys_index, unsigned int *err = &ERRNO);
 void set_error_bit      (unsigned int *error, int bit);
+
+void init_debug_info (List *list, const int call_line, const char *call_file, const char *call_func,
+                      const char *file, const char *func);
+void debug_list_ctor          (List *list, int capacity, unsigned int *err,
+                               const int call_line, const char *call_file, const char *call_func);
+void debug_list_dtor          (List *list, unsigned int *err,
+                               const int call_line, const char *call_file, const char *call_func);
+int debug_list_insert         (List *list, int put_place, list_elem_t value, unsigned int *err,
+                               const int call_line, const char *call_file, const char *call_func);
+list_elem_t debug_list_remove (List *list, int remove_place, unsigned int *err,
+                               const int call_line, const char *call_file, const char *call_func);
+int debug_linearize_list      (List *list, unsigned int *err,
+                               const int call_line, const char *call_file, const char *call_func);
+int debug_find_logic_number   (List *list, int phys_index, unsigned int *err,
+                               const int call_line, const char *call_file, const char *call_func);
+int debug_find_number         (List *list, int phys_index, unsigned int *err,
+                               const int call_line, const char *call_file, const char *call_func);
 
 void set_error_bit (unsigned int *error, int bit)
 {
@@ -240,10 +270,8 @@ void list_realloc (List *list, int previous_capacity, unsigned int *err)
     }
 }
 
-//for цикл
 //headers in dump (h2)
 //---------------------
-//<details>
 int find_logic_number (List *list, int phys_index, unsigned int *err)
 {
     printf ("the function will be working too long, do you really want to call it? (yes/no)");
@@ -318,7 +346,7 @@ int find_number (List *list, int phys_index, unsigned int *err)
 
 }
 
-int linearize_list (List *list, unsigned int *err, const int seek_index)
+int linearize_list (List *list, unsigned int *err)
 {
     //no additional memory
     List_elem *temp_elems = (List_elem *)calloc (list->capacity, sizeof (List_elem));
@@ -334,15 +362,9 @@ int linearize_list (List *list, unsigned int *err, const int seek_index)
 
     int phys_index  = list->elems[NULL_ELEM].next;
     int logic_index = 1;
-    int desired_logic_index = 0;
 
     while (logic_index <= list->size)
     {
-        if (seek_index > 0 && phys_index == seek_index)
-        {
-            desired_logic_index = logic_index;
-        }
-
         temp_elems[logic_index].data = list->elems[phys_index].data;
         temp_elems[logic_index].next = logic_index + 1;
         temp_elems[logic_index].prev = logic_index - 1;
@@ -374,7 +396,7 @@ int linearize_list (List *list, unsigned int *err, const int seek_index)
 
     check_list (list, err);
 
-    return desired_logic_index;
+    return 0;
 }
 
 void fill_list (List *list, int start, unsigned int *err)
@@ -486,7 +508,7 @@ int check_list (List *list, unsigned int *err)
         #endif
     }while(0);
 
-    if (*err)
+    //if (*err)
     {
     list_dump (list, err);
     }
@@ -502,8 +524,6 @@ void list_dump (List *list, unsigned int *err)
     fprintf (list_log, "<pre>\n");
 
     fprintf (list_log, "<details>");
-
-    fprintf (list_log, "list[%p]\n", list);
 
     dump_list_members (list, err);
 
@@ -630,6 +650,11 @@ void make_graph (List *list, FILE *list_graph)
 
 void dump_list_members (List *list, unsigned int *err)
 {
+    fprintf (list_log, "%s at file %s, called at %s at %s, line %d\n", list->debug_info.func, list->debug_info.file,
+    list->debug_info.call_func, list->debug_info.call_file, list->debug_info.call_line);
+
+    fprintf (list_log, "list[%p]\n", list);
+
     fprintf (list_log, "list head is %d\nlist tale is %d\n"
                        "list size id %d\nlist capacity id %d\n"
                        "list free is %d\nlist elems is [%p]\n",
@@ -677,6 +702,97 @@ void dump_list_errors (List *list, unsigned int *err)
 #undef log_error
 }
 
+void init_debug_info (List *list, const int call_line, const char *call_file, const char *call_func,
+                      const char *file, const char *debug_func)
+{
+    list->debug_info.call_line = call_line;
+    list->debug_info.call_file = call_file;
+    list->debug_info.call_func = call_func;
 
+    list->debug_info.file = file;
+    list->debug_info.func = debug_func;
+}
+
+void debug_list_ctor (List *list, int capacity, unsigned int *err,
+                      const int call_line, const char *call_file, const char *call_func)
+{
+    init_debug_info (list, call_line, call_file, call_func, __FILE__,
+                    "void list_ctor (List *list, int capacity, unsigned int *err = &ERRNO)");
+
+    list_ctor (list, capacity, err);
+}
+
+void debug_list_dtor (List *list, unsigned int *err,
+                      const int call_line, const char *call_file, const char *call_func)
+{
+    init_debug_info (list, call_line, call_file, call_func, __FILE__,
+                    "void list_dtor (List *list, unsigned int *err = &ERRNO)");
+
+    list_dtor (list, err);
+}
+
+int debug_list_insert (List *list, int put_place, list_elem_t value, unsigned int *err,
+                       const int call_line, const char *call_file, const char *call_func)
+{
+    init_debug_info (list, call_line, call_file, call_func, __FILE__,
+                    "int list_insert (List *list, int put_place, list_elem_t value, unsigned int *err = &ERRNO)");
+
+    return list_insert (list, put_place, value, err);
+}
+
+list_elem_t debug_list_remove (List *list, int remove_place, unsigned int *err,
+                               const int call_line, const char *call_file, const char *call_func)
+{
+    init_debug_info (list, call_line, call_file, call_func, __FILE__,
+                    "list_elem_t list_remove (List *list, int remove_place, unsigned int *err = &ERRNO)");
+
+    return list_remove (list, remove_place, err);
+}
+
+int debug_linearize_list (List *list, unsigned int *err,
+                          const int call_line, const char *call_file, const char *call_func)
+{
+    init_debug_info (list, call_line, call_file, call_func, __FILE__,
+                    "int linearize_list (List *list, unsigned int *err = &ERRNO);");
+
+    return linearize_list (list, err);
+}
+
+int debug_find_logic_number (List *list, int phys_index, unsigned int *err,
+                             const int call_line, const char *call_file, const char *call_func)
+{
+    init_debug_info (list, call_line, call_file, call_func, __FILE__,
+                    "int find_logic_number (List *list, int phys_index, unsigned int *err = &ERRNO)");
+
+    return find_logic_number (list, phys_index, err);
+}
+
+int debug_find_number (List *list, int phys_index, unsigned int *err,
+                       const int call_line, const char *call_file, const char *call_func)
+{
+    init_debug_info (list, call_line, call_file, call_func, __FILE__,
+                    "int find_number (List *list, int phys_index, unsigned int *err = &ERRNO)");
+
+    return find_number (list, phys_index, err);
+}
+
+#ifdef LIST_DEBUG
+
+#define list_ctor(list, capacity, err)                                                          \
+        debug_list_ctor (list, capacity, err, __LINE__, __FILE__, __PRETTY_FUNCTION__)
+#define list_dtor(list, err)                                                                    \
+        debug_list_dtor (list, err, __LINE__, __FILE__, __PRETTY_FUNCTION__)
+#define list_insert(list, put_place, value, err)                                                \
+        debug_list_insert (list, put_place, value, err, __LINE__, __FILE__, __PRETTY_FUNCTION__)
+#define list_remove(list, remove_place, err)                                                    \
+        debug_list_remove (list, remove_place, err, __LINE__, __FILE__, __PRETTY_FUNCTION__)
+#define linearize_list(list, err)                                                               \
+        debug_linearize_list (list, err, __LINE__, __FILE__, __PRETTY_FUNCTION__)
+#define find_logic_number(list, phys_index, err)                                                \
+        debug_find_logic_number (list, phys_index, err, __LINE__, __FILE__, __PRETTY_FUNCTION__)
+#define find_number(list, phys_index, err)                                                      \
+        debug_find_number (list, phys_index, err, __LINE__, __FILE__, __PRETTY_FUNCTION__)
+
+#endif
 
 #endif /* LIST_H */
