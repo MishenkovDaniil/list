@@ -508,7 +508,7 @@ int check_list (List *list, unsigned int *err)
         #endif
     }while(0);
 
-    //if (*err)
+    if (*err)
     {
     list_dump (list, err);
     }
